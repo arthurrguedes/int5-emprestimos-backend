@@ -10,9 +10,9 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 export const AppDataBase = new DataSource({
-type: 'postgres',
+type: 'mysql',
 url: process.env.DATABASE_URL,
-synchronize: false, // deixe false em produção; use migrations
+synchronize: false, 
 logging: false,
 entities: [UsuarioReferencia, Bibliotecario, LivroReferencia, Emprestimo, ItemEmprestimo],
 });
