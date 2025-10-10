@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Emprestimo } from './entities/emprestimo.entity';
 import { ItemEmprestimo } from './entities/item-emprestimo.entity';
@@ -27,9 +27,8 @@ export class EmprestimosService {
     private bibliotecarioRepo: Repository<Bibliotecario>,
   ) {}
 
-   //Cria um empréstimo com seus itens em transação.
-   //Valida existência de usuário, bibliotecário e livros referenciados.
-
+  //Cria um empréstimo com seus itens em transação.
+  //Valida existência de usuário, bibliotecário e livros referenciados.
   async create(createDto: CreateEmprestimoDTO): Promise<Emprestimo> {
     // Validações de FK
     const usuario = await this.usuarioRepo.findOne({ where: { id: createDto.idUsuario } });
@@ -49,7 +48,7 @@ export class EmprestimosService {
       id: createDto.id,
       dataEmprestimo: createDto.dataEmprestimo,
       dataPrevista: createDto.dataPrevista,
-      status: 'Vigente',
+      status: 'Vigente', // O status aqui pode ser maiúsculo, será formatado na leitura
       idUsuario: createDto.idUsuario,
       idBibliotecario: createDto.idBibliotecario,
     });
@@ -106,14 +105,55 @@ export class EmprestimosService {
     return this.emprestRepo.save(emprest);
   }
 
-  /** Listar por usuário */
-  async findByUsuario(idUsuario: number): Promise<Emprestimo[]> {
-    return this.emprestRepo.find({ where: { idUsuario }, relations: ['itens'] });
+  /** Listar por usuário com dados do livro enriquecidos e padronizados */
+  async findByUsuario(idUsuario: number): Promise<any[]> {
+    const emprestimos = await this.emprestRepo.find({
+      where: { idUsuario },
+      relations: ['itens'],
+      order: { dataEmprestimo: 'DESC' },
+    });
+
+    if (emprestimos.length === 0) {
+      return [];
+    }
+
+    const idsLivros = emprestimos.flatMap(e => e.itens.map(item => item.idLivro));
+    const idsUnicos = [...new Set(idsLivros)];
+
+    const livros = await this.livroRepo.find({
+      where: { id: In(idsUnicos) },
+    });
+    const livrosMap = new Map(livros.map(livro => [livro.id, livro]));
+
+    const resultadoFinal = emprestimos.map(emprestimo => {
+      const primeiroItem = emprestimo.itens[0];
+      const livroInfo = livrosMap.get(primeiroItem.idLivro);
+
+      return {
+        id: emprestimo.id,
+        titulo: livroInfo ? livroInfo.titulo : 'Título não encontrado',
+        ano: new Date(emprestimo.dataEmprestimo).getFullYear(),
+        dataInicio: emprestimo.dataEmprestimo,
+        dataFim: emprestimo.dataPrevista,
+        dataDevolucao: emprestimo.dataDevolucao,
+        status: this.formatarStatus(emprestimo.status), // << Correção aplicada aqui
+      };
+    });
+    return resultadoFinal;
   }
 
   /** Remover empréstimo */
   async remove(id: number): Promise<void> {
     const emprest = await this.findById(id);
     await this.emprestRepo.remove(emprest);
+  }
+
+  /**
+   * Helper privado para padronizar a string de status.
+   * Ex: 'VIGENTE' -> 'Vigente'
+   */
+  private formatarStatus(status: string): string {
+    if (!status) return '';
+    return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
   }
 }
